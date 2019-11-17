@@ -107,6 +107,7 @@ private:
     };
 
     PostProcessMaterial mSSAO;
+    PostProcessMaterial mStructure;
     PostProcessMaterial mMipmapDepth;
     PostProcessMaterial mBlur;
     PostProcessMaterial mTonemapping;

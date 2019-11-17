@@ -70,7 +70,7 @@ void RenderPass::overridePolygonOffset(backend::PolygonOffset* polygonOffset) no
 }
 
 void RenderPass::overrideMaterial(FMaterial const* material, FMaterialInstance const* mi) noexcept {
-    assert(mi->getMaterial() == material);
+    assert(!mi || mi->getMaterial() == material);
     mMaterialInstanceOverride = mi;
 }
 

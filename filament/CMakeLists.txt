@@ -142,6 +142,7 @@ set(MATERIAL_SRCS
         src/materials/skybox.mat
         src/materials/sao.mat
         src/materials/ssao.mat
+        src/materials/structure.mat
         src/materials/tonemapping.mat
         src/materials/fxaa.mat
 )

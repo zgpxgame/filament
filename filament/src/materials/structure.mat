@@ -1,0 +1,22 @@
+material {
+    name : structure,
+    parameters : [
+    ],
+    variables : [
+         vertex
+    ],
+    domain : postprocess,
+    depthWrite : true,
+    depthCulling : true
+}
+
+vertex {
+    void postProcessVertex(inout PostProcessVertexInputs postProcess) {
+        // we need to emulate the real depth shader
+    }
+}
+
+fragment {
+    void postProcess(inout PostProcessInputs postProcess) {
+    }
+}

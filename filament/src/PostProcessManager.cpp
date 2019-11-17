@@ -87,6 +87,7 @@ PostProcessManager::PostProcessManager(FEngine& engine) noexcept : mEngine(engin
 void PostProcessManager::init() noexcept {
     // TODO: load materials lazily as to reduce start-up time and memory usage
     mSSAO = PostProcessMaterial(mEngine, MATERIALS_SAO_DATA, MATERIALS_SAO_SIZE);
+    mStructure = PostProcessMaterial(mEngine, MATERIALS_STRUCTURE_DATA, MATERIALS_STRUCTURE_SIZE);
     mMipmapDepth = PostProcessMaterial(mEngine, MATERIALS_MIPMAPDEPTH_DATA, MATERIALS_MIPMAPDEPTH_SIZE);
     mBlur = PostProcessMaterial(mEngine, MATERIALS_BLUR_DATA, MATERIALS_BLUR_SIZE);
     mTonemapping = PostProcessMaterial(mEngine, MATERIALS_TONEMAPPING_DATA, MATERIALS_TONEMAPPING_SIZE);
@@ -413,6 +414,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::depthPass(FrameGraph& fg, Re
 
     // SSAO depth pass -- automatically culled if not used
     struct DepthPassData {
+        FrameGraphId<FrameGraphTexture> derivatives;
         FrameGraphId<FrameGraphTexture> depth;
         FrameGraphRenderTargetHandle rt;
     };
@@ -431,7 +433,11 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::depthPass(FrameGraph& fg, Re
     // SSAO generates its own depth pass at the requested resolution
     auto& ssaoDepthPass = fg.addPass<DepthPassData>("SSAO Depth Pass",
             [&](FrameGraph::Builder& builder, DepthPassData& data) {
-                data.depth = builder.createTexture("Depth Buffer", {
+                data.derivatives = builder.createTexture("SSAO derivatives Buffer", {
+                        .width = width, .height = height,
+                        .format = TextureFormat::RGB16F });
+
+                data.depth = builder.createTexture("SSAO Depth Buffer", {
                         .width = width, .height = height,
                         .levels = uint8_t(levelCount),
                         .format = TextureFormat::DEPTH24 });
@@ -440,6 +446,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::depthPass(FrameGraph& fg, Re
 
                 // nested designated initializers not in C++ standard: https://tinyurl.com/y6krwocx
                 FrameGraphRenderTarget::Descriptor d;
+                d.attachments.color = data.derivatives;
                 d.attachments.depth = data.depth;
                 data.rt = builder.createRenderTarget("SSAO Depth Target", d,
                                                      TargetBufferFlags::DEPTH);
@@ -447,7 +454,9 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::depthPass(FrameGraph& fg, Re
             [=, &pass](FrameGraphPassResources const& resources,
                     DepthPassData const& data, DriverApi& driver) {
                 auto out = resources.getRenderTarget(data.rt);
+                pass.overrideMaterial(mStructure.getMaterial(), mStructure.getMaterialInstance());
                 pass.execute(resources.getPassName(), out.target, out.params, first, last);
+                pass.overrideMaterial(nullptr, nullptr);
             });
 
     return ssaoDepthPass.getData().depth;
