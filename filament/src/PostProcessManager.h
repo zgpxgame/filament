@@ -135,7 +135,6 @@ private:
 
     backend::Handle<backend::HwTexture> mDummyOneTexture;
     backend::Handle<backend::HwTexture> mDummyZeroTexture;
-    backend::Handle<backend::HwTexture> mNoiseTexture;
 
     size_t mSeparableGaussianBlurKernelStorageSize = 0;
 };
