@@ -233,9 +233,9 @@ public:
     }
 
     void setAmbientOcclusionOptions(AmbientOcclusionOptions options) noexcept {
-        options.radius = math::clamp(0.0f, 10.0f, options.radius);
+        options.radius = math::max(0.0f, options.radius);
         options.bias = math::clamp(0.0f, 0.1f, options.bias);
-        options.power = math::clamp(0.0f, 1.0f, options.power);
+        options.power = std::max(0.0f, options.power);
         options.resolution = math::clamp(0.0f, 1.0f, options.resolution);
         mAmbientOcclusionOptions = options;
     }
