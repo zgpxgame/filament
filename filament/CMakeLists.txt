@@ -144,6 +144,7 @@ set(MATERIAL_SRCS
         src/materials/bloomDownsample.mat
         src/materials/bloomUpsample.mat
         src/materials/bilateralBlur.mat
+        src/materials/linearizeDepth.mat
         src/materials/mipmapDepth.mat
         src/materials/skybox.mat
         src/materials/sao.mat

@@ -1,0 +1,35 @@
+material {
+    name : mipmapDepth,
+    parameters : [
+        {
+            type : sampler2d,
+            name : depth,
+            precision: high
+        }
+    ],
+    variables : [
+    ],
+    domain : postprocess,
+    depthWrite : false,
+    depthCulling : false,
+    culling: none
+}
+
+fragment {
+    highp float linearizeDepth(highp float depth) {
+        // Our far plane is at infinity, which causes a division by zero below, which in turn
+        // causes some issues on some GPU. We workaround it by replacing "infinity" by the closest
+        // value representable in  a 24 bit depth buffer.
+        const float preventDiv0 = -1.0 / 16777216.0;
+        highp mat4 projection = getClipFromViewMatrix();
+        highp float z = depth * 2.0 - 1.0; // depth in clip space
+        return -projection[3].z / min(preventDiv0, z + projection[2].z);
+    }
+
+    void postProcess(inout PostProcessInputs postProcess) {
+        highp ivec2 icoord = ivec2(gl_FragCoord.xy);
+        postProcess.color.r = linearizeDepth(texelFetch(materialParams_depth, icoord, 0).r);
+        //gl_FragDepth = linearizeDepth(texelFetch(materialParams_depth, icoord, 0).r);
+        //gl_FragDepth = texelFetch(materialParams_depth, icoord, 0).r;
+    }
+}

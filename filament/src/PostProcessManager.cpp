@@ -93,6 +93,7 @@ void PostProcessManager::init() noexcept {
     // TODO: load materials lazily as to reduce start-up time and memory usage
     mSSAO = PostProcessMaterial(mEngine, MATERIALS_SAO_DATA, MATERIALS_SAO_SIZE);
     mMipmapDepth = PostProcessMaterial(mEngine, MATERIALS_MIPMAPDEPTH_DATA, MATERIALS_MIPMAPDEPTH_SIZE);
+    mLinearizeDepth = PostProcessMaterial(mEngine, MATERIALS_LINEARIZEDEPTH_DATA, MATERIALS_LINEARIZEDEPTH_SIZE);
     mBilateralBlur = PostProcessMaterial(mEngine, MATERIALS_BILATERALBLUR_DATA, MATERIALS_BILATERALBLUR_SIZE);
     mSeparableGaussianBlur = PostProcessMaterial(mEngine, MATERIALS_SEPARABLEGAUSSIANBLUR_DATA, MATERIALS_SEPARABLEGAUSSIANBLUR_SIZE);
     mBloomDownsample = PostProcessMaterial(mEngine, MATERIALS_BLOOMDOWNSAMPLE_DATA, MATERIALS_BLOOMDOWNSAMPLE_SIZE);
@@ -130,6 +131,7 @@ void PostProcessManager::terminate(DriverApi& driver) noexcept {
     driver.destroyTexture(mDummyZeroTexture);
     mSSAO.terminate(engine);
     mMipmapDepth.terminate(engine);
+    mLinearizeDepth.terminate(engine);
     mBilateralBlur.terminate(engine);
     mSeparableGaussianBlur.terminate(engine);
     mBloomDownsample.terminate(engine);
@@ -454,14 +456,59 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
 
     FrameGraphId<FrameGraphTexture> depth = depthPass(fg, pass, svp.width, svp.height, options);
 
+
+    // We limit the lowest lod size to 32 pixels (which is where the -5 comes from)
+    auto desc = fg.getDescriptor(depth);
+    desc.levels = FTexture::maxLevelCount(desc.width, desc.height) - 5;
+    desc.format = TextureFormat::R32F;
+    assert(desc.levels >= 1);
+
+    struct linearizeDepthPassData {
+        FrameGraphId<FrameGraphTexture> in;
+        FrameGraphId<FrameGraphTexture> out;
+        FrameGraphRenderTargetHandle rt;
+    };
+
+    // SSAO generates its own depth pass at the requested resolution
+    auto& linearizeDepthPass = fg.addPass<linearizeDepthPassData>("Linearize Depth Pass",
+            [&](FrameGraph::Builder& builder, auto& data) {
+                data.in = builder.sample(depth);
+                data.out = builder.createTexture("Linearized Depth Buffer", desc);
+                data.out = builder.write(data.out);
+                data.rt = builder.createRenderTarget("Linearized Depth Target", {
+                        .attachments = {{ data.out }, {}}
+                }, TargetBufferFlags::NONE);
+            },
+            [=](FrameGraphPassResources const& resources, auto const& data, DriverApi& driver) {
+                auto out = resources.getRenderTarget(data.rt);
+                auto depth = resources.getTexture(data.in);
+
+                FMaterialInstance* const mi = mLinearizeDepth.getMaterialInstance();
+                mi->setParameter("depth", depth, { /* uses texelFetch */ });
+                mi->commit(driver);
+                mi->use(driver);
+
+                PipelineState pipeline{
+                        .program = mLinearizeDepth.getProgram(),
+                        .rasterState = mLinearizeDepth.getMaterial()->getRasterState(),
+                        .scissor = mi->getScissor(),
+                };
+
+                driver.beginRenderPass(out.target, out.params);
+                driver.draw(pipeline, fullScreenRenderPrimitive);
+                driver.endRenderPass();
+            });
+
+    auto linearDepth = linearizeDepthPass.getData().out;
+
     /*
      * create depth mipmap chain
      */
 
     // The first mip already exists, so we process n-1 lods
-    const size_t levelCount = fg.getDescriptor(depth).levels;
+    const size_t levelCount = fg.getDescriptor(linearDepth).levels;
     for (size_t level = 0; level < levelCount - 1; level++) {
-        depth = mipmapPass(fg, depth, level);
+        linearDepth = mipmapPass(fg, linearDepth, level);
     }
 
     /*
@@ -470,6 +517,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
 
     struct SSAOPassData {
         FrameGraphId<FrameGraphTexture> depth;
+        FrameGraphId<FrameGraphTexture> linearDepth;
         FrameGraphId<FrameGraphTexture> ssao;
         View::AmbientOcclusionOptions options;
         FrameGraphRenderTargetHandle rt;
@@ -477,10 +525,10 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
 
     auto& SSAOPass = fg.addPass<SSAOPassData>("SSAO Pass",
             [&](FrameGraph::Builder& builder, auto& data) {
-                auto const& desc = builder.getDescriptor(depth);
+                auto const& desc = builder.getDescriptor(linearDepth);
 
                 data.options = options;
-                data.depth = builder.sample(depth);
+                data.linearDepth = builder.sample(linearDepth);
                 data.ssao = builder.createTexture("SSAO Buffer", {
                         .width = desc.width,
                         .height = desc.height,
@@ -492,6 +540,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
                 // reading into it even though they were not written in the depth buffer.
                 // The bilateral filter in the blur pass will ignore pixels at infinity.
 
+                data.depth = builder.read(depth);
                 data.ssao = builder.write(data.ssao);
                 data.rt = builder.createRenderTarget("SSAO Target", {
                         .attachments = { data.ssao, data.depth }
@@ -499,7 +548,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
             },
             [=](FrameGraphPassResources const& resources,
                     auto const& data, DriverApi& driver) {
-                auto depth = resources.getTexture(data.depth);
+                auto linearDepth = resources.getTexture(data.linearDepth);
                 auto ssao = resources.getRenderTarget(data.rt);
                 auto const& desc = resources.getDescriptor(data.ssao);
 
@@ -508,30 +557,30 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
                         0.5f * cameraInfo.projection[0].x * desc.width,
                         0.5f * cameraInfo.projection[1].y * desc.height);
 
-                FMaterialInstance* const pInstance = mSSAO.getMaterialInstance();
-                pInstance->setParameter("depth", depth, {
+                FMaterialInstance* const mi = mSSAO.getMaterialInstance();
+                mi->setParameter("depth", linearDepth, {
                         .filterMin = SamplerMinFilter::NEAREST_MIPMAP_NEAREST
                 });
-                pInstance->setParameter("resolution",
+                mi->setParameter("resolution",
                         float4{ desc.width, desc.height, 1.0f / desc.width, 1.0f / desc.height });
-                pInstance->setParameter("radius", data.options.radius);
-                pInstance->setParameter("invRadiusSquared", 1.0f / (data.options.radius * data.options.radius));
-                pInstance->setParameter("projectionScaleRadius", projectionScale * data.options.radius);
-                pInstance->setParameter("bias", data.options.bias);
-                pInstance->setParameter("power", data.options.power);
-                pInstance->setParameter("intensity", std::max(0.0f, data.options.intensity));
-                pInstance->setParameter("maxLevel", uint32_t(levelCount - 1));
-                pInstance->commit(driver);
+                mi->setParameter("radius", data.options.radius);
+                mi->setParameter("invRadiusSquared", 1.0f / (data.options.radius * data.options.radius));
+                mi->setParameter("projectionScaleRadius", projectionScale * data.options.radius);
+                mi->setParameter("bias", data.options.bias);
+                mi->setParameter("power", data.options.power);
+                mi->setParameter("intensity", std::max(0.0f, data.options.intensity));
+                //mi->setParameter("maxLevel", uint32_t(levelCount - 1));
+                mi->commit(driver);
+                mi->use(driver);
 
                 PipelineState pipeline;
                 pipeline.program = mSSAO.getProgram();
                 pipeline.rasterState = mSSAO.getMaterial()->getRasterState();
                 pipeline.rasterState.depthFunc = RasterState::DepthFunc::G;
-                pipeline.scissor = pInstance->getScissor();
+                pipeline.scissor = mi->getScissor();
 
                 ssao.params.clearColor = 1.0f;
                 driver.beginRenderPass(ssao.target, ssao.params);
-                pInstance->use(driver);
                 driver.draw(pipeline, fullScreenRenderPrimitive);
                 driver.endRenderPass();
             });
@@ -543,10 +592,10 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::ssao(FrameGraph& fg, RenderP
      */
 
     // horizontal separable blur pass
-    ssao = bilateralBlurPass(fg, ssao, depth, { 1, 0 });
+    ssao = bilateralBlurPass(fg, ssao, linearDepth, depth, { 1, 0 });
 
     // vertical separable blur pass
-    ssao = bilateralBlurPass(fg, ssao, depth, { 0, 1 });
+    ssao = bilateralBlurPass(fg, ssao, linearDepth, depth, { 0, 1 });
     return ssao;
 }
 
@@ -564,16 +613,11 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::depthPass(FrameGraph& fg, Re
     width  = std::max(32u, (uint32_t)std::ceil(width * scale));
     height = std::max(32u, (uint32_t)std::ceil(height * scale));
 
-    // We limit the lowest lod size to 32 pixels (which is where the -5 comes from)
-    const size_t levelCount = FTexture::maxLevelCount(width, height) - 5;
-    assert(levelCount >= 1);
-
     // SSAO generates its own depth pass at the requested resolution
     auto& ssaoDepthPass = fg.addPass<DepthPassData>("SSAO Depth Pass",
             [&](FrameGraph::Builder& builder, DepthPassData& data) {
                 data.depth = builder.createTexture("Depth Buffer", {
                         .width = width, .height = height,
-                        .levels = uint8_t(levelCount),
                         .format = TextureFormat::DEPTH24 });
 
                 data.depth = builder.write(builder.read(data.depth));
@@ -609,7 +653,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::mipmapPass(FrameGraph& fg,
                 data.in = builder.sample(input);
                 data.out = builder.write(data.in);
                 FrameGraphRenderTarget::Descriptor d;
-                d.attachments.depth = { data.out, uint8_t(level + 1) };
+                d.attachments.color = { data.out, uint8_t(level + 1) };
                 data.rt = builder.createRenderTarget(name, d);
             },
             [=](FrameGraphPassResources const& resources,
@@ -638,15 +682,16 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::mipmapPass(FrameGraph& fg,
     return depthMipmapPass.getData().out;
 }
 
-FrameGraphId<FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph& fg,
-        FrameGraphId<FrameGraphTexture> input,
-        FrameGraphId<FrameGraphTexture> depth, math::int2 axis) noexcept {
+FrameGraphId <FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph& fg,
+        FrameGraphId <FrameGraphTexture> input, FrameGraphId <FrameGraphTexture> linearDepth,
+        FrameGraphId <FrameGraphTexture> depth, math::int2 axis) noexcept {
 
     Handle<HwRenderPrimitive> fullScreenRenderPrimitive = mEngine.getFullScreenRenderPrimitive();
 
     struct BlurPassData {
         FrameGraphId<FrameGraphTexture> input;
         FrameGraphId<FrameGraphTexture> depth;
+        FrameGraphId<FrameGraphTexture> linearDepth;
         FrameGraphId<FrameGraphTexture> blurred;
         FrameGraphRenderTargetHandle rt;
     };
@@ -657,7 +702,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph
                 auto const& desc = builder.getDescriptor(input);
 
                 data.input = builder.sample(input);
-                data.depth = builder.sample(depth);
+                data.linearDepth = builder.sample(linearDepth);
 
                 data.blurred = builder.createTexture("Blurred output", {
                         .width = desc.width, .height = desc.height, .format = desc.format });
@@ -668,6 +713,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph
                 // doesn't use SSAO.
                 depth = builder.read(depth);
                 data.blurred = builder.write(data.blurred);
+                data.depth = builder.sample(depth);
                 data.rt = builder.createRenderTarget("Blurred target",
                         { .attachments = { data.blurred, depth }
                         }, TargetBufferFlags::NONE);
@@ -675,7 +721,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph
             [=](FrameGraphPassResources const& resources,
                     BlurPassData const& data, DriverApi& driver) {
                 auto ssao = resources.getTexture(data.input);
-                auto depth = resources.getTexture(data.depth);
+                auto linearDepth = resources.getTexture(data.linearDepth);
                 auto blurred = resources.getRenderTarget(data.rt);
                 auto const& desc = resources.getDescriptor(data.blurred);
 
@@ -683,7 +729,7 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bilateralBlurPass(FrameGraph
                 //       z-distance that constitute an edge for bilateral filtering
                 FMaterialInstance* const pInstance = mBilateralBlur.getMaterialInstance();
                 pInstance->setParameter("ssao", ssao, { /* only reads level 0 */ });
-                pInstance->setParameter("depth", depth, { /* only reads level 0 */ });
+                pInstance->setParameter("depth", linearDepth, { /* only reads level 0 */ });
                 pInstance->setParameter("axis", axis / float2{desc.width, desc.height});
                 pInstance->setParameter("oneOverEdgeDistance", 1.0f / 0.1f);
                 pInstance->commit(driver);

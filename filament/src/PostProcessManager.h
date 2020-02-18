@@ -89,9 +89,9 @@ private:
     FrameGraphId<FrameGraphTexture> mipmapPass(FrameGraph& fg,
             FrameGraphId<FrameGraphTexture> input, size_t level) noexcept;
 
-    FrameGraphId<FrameGraphTexture> bilateralBlurPass(FrameGraph& fg,
-            FrameGraphId<FrameGraphTexture> input,
-            FrameGraphId<FrameGraphTexture> depth, math::int2 axis) noexcept;
+    FrameGraphId <FrameGraphTexture> bilateralBlurPass(FrameGraph& fg,
+            FrameGraphId <FrameGraphTexture> input, FrameGraphId <FrameGraphTexture> linearDepth,
+            FrameGraphId <FrameGraphTexture> depth, math::int2 axis) noexcept;
 
     FrameGraphId<FrameGraphTexture> bloomPass(FrameGraph& fg,
             FrameGraphId<FrameGraphTexture> input, backend::TextureFormat outFormat,
@@ -124,6 +124,7 @@ private:
     };
 
     PostProcessMaterial mSSAO;
+    PostProcessMaterial mLinearizeDepth;
     PostProcessMaterial mMipmapDepth;
     PostProcessMaterial mBilateralBlur;
     PostProcessMaterial mSeparableGaussianBlur;

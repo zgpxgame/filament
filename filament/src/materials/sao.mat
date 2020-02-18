@@ -82,18 +82,8 @@ fragment {
         return fract(m.z * fract(dot(w.xy, m.xy)));
     }
 
-    highp float linearizeDepth(highp float depth) {
-        // Our far plane is at infinity, which causes a division by zero below, which in turn
-        // causes some issues on some GPU. We workaround it by replacing "infinity" by the closest
-        // value representable in  a 24 bit depth buffer.
-        const float preventDiv0 = -1.0 / 16777216.0;
-        highp mat4 projection = getClipFromViewMatrix();
-        highp float z = depth * 2.0 - 1.0; // depth in clip space
-        return -projection[3].z / min(preventDiv0, z + projection[2].z);
-    }
-
     highp float sampleDepthLinear(const vec2 uv, float level) {
-        return linearizeDepth(textureLod(materialParams_depth, uv, level).r);
+        return textureLod(materialParams_depth, uv, level).r;
     }
 
     highp vec3 computeViewSpacePositionFromDepth(vec2 p, highp float linearDepth) {
@@ -106,22 +96,20 @@ fragment {
 
     // compute normals using derivatives, which essentially results in half-resolution normals
     // this creates arifacts around geometry edges.
-    // Moreover, this seems slower (measured on Pixel4), which I find curious.
-    highp vec3 computeViewSpaceNormalNotNormalized(const highp vec3 position) {
-        highp vec3 dpdx = dFdx(position);
-        highp vec3 dpdy = dFdy(position);
-        return cross(dpdx, dpdy);
+    // Moreover, this seems 60% slower (measured on Pixel4), which I find curious.
+    vec3 computeViewSpaceNormal(const highp vec3 position) {
+        return normalize(cross(dFdx(position), dFdy(position)));
     }
 
     // compute normals directly from the depth texture, resulting in full resolution normals
-    highp vec3 computeViewSpaceNormalNotNormalized(const highp vec3 position, const vec2 uv) {
+    vec3 computeViewSpaceNormal(const highp vec3 position, const vec2 uv) {
         vec2 uvdx = uv + vec2(materialParams.resolution.z, 0.0);
         vec2 uvdy = uv + vec2(0.0, materialParams.resolution.w);
         highp vec3 px = computeViewSpacePositionFromDepth(uvdx, sampleDepthLinear(uvdx, 0.0));
         highp vec3 py = computeViewSpacePositionFromDepth(uvdy, sampleDepthLinear(uvdy, 0.0));
         highp vec3 dpdx = px - position;
         highp vec3 dpdy = py - position;
-        return cross(dpdx, dpdy);
+        return normalize(cross(dpdx, dpdy));
     }
 
     // Ambient Occlusion, largely inspired from:
@@ -164,9 +152,8 @@ fragment {
 
         highp float depth = sampleDepthLinear(uv, 0.0);
         highp vec3 origin = computeViewSpacePositionFromDepth(uv, depth);
-        highp vec3 normalNotNormalized = computeViewSpaceNormalNotNormalized(origin, uv);
 
-        vec3 normal = normalize(normalNotNormalized);
+        vec3 normal = computeViewSpaceNormal(origin, uv);
         float noise = random(gl_FragCoord.xy);
 
         // Choose the screen-space sample radius
