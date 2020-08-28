@@ -119,7 +119,7 @@ struct FrameGraphRenderTarget {
             // auto convert to FrameGraphHandle (allows: handle = desc.attachments.color;)
             operator FrameGraphId<FrameGraphTexture>() const noexcept { return mHandle; } // NOLINT
 
-            AttachmentInfo() noexcept = default;
+            AttachmentInfo() = default;
 
             // auto convert from FrameGraphHandle (allows: desc.attachments.color = handle;)
             AttachmentInfo(FrameGraphId<FrameGraphTexture> handle) noexcept : mHandle(handle) {} // NOLINT

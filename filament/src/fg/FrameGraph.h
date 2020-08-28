@@ -73,11 +73,11 @@ public:
             return mFrameGraph.create<T>(name, desc);
         }
 
-        template<>
-        FrameGraphId<FrameGraphRenderTarget> create(const char* name,
-                typename FrameGraphRenderTarget::Descriptor const& desc) noexcept {
-            return createRenderTargetImpl(name, desc);
-        }
+        //template<>
+        //FrameGraphId<FrameGraphRenderTarget> create(const char* name,
+        //        typename FrameGraphRenderTarget::Descriptor const& desc) noexcept {
+        //    return createRenderTargetImpl(name, desc);
+        //}
 
         // Helper to create a Texture resource
         FrameGraphId<FrameGraphTexture> createTexture(const char* name,
@@ -87,9 +87,7 @@ public:
 
         // Helper to create a RenderTarget resource
         FrameGraphId<FrameGraphRenderTarget> createRenderTarget(const char* name,
-                FrameGraphRenderTarget::Descriptor const& desc) noexcept {
-            return create<FrameGraphRenderTarget>(name, desc);
-        }
+                FrameGraphRenderTarget::Descriptor const& desc) noexcept;
 
         // Read from a resource (i.e. add a reference to that resource)
         // Note: FrameGraphRenderTarget resource are special in that they can't be read from
@@ -214,14 +212,14 @@ public:
         return FrameGraphId<T>(create(pBase));
     }
 
-    template<>
-    FrameGraphId<FrameGraphRenderTarget> import(const char* name,
-            typename FrameGraphRenderTarget::Descriptor const& desc,
-            const FrameGraphRenderTarget& resource) noexcept {
-        fg::ResourceEntryBase* pBase = mArena.make<fg::RenderTargetResourceEntry>(
-                name, desc, resource, mId++, 1);
-        return FrameGraphId<FrameGraphRenderTarget>(create(pBase));
-    }
+    //template<>
+    //FrameGraphId<FrameGraphRenderTarget> import(const char* name,
+    //        typename FrameGraphRenderTarget::Descriptor const& desc,
+    //        const FrameGraphRenderTarget& resource) noexcept {
+    //    fg::ResourceEntryBase* pBase = mArena.make<fg::RenderTargetResourceEntry>(
+    //            name, desc, resource, mId++, 1);
+    //    return FrameGraphId<FrameGraphRenderTarget>(create(pBase));
+    //}
 
     // Moves the resource associated to the handle 'from' to the handle 'to'. After this call,
     // all handles referring to the resource 'to' are redirected to the resource 'from'
@@ -294,13 +292,13 @@ private:
         return r;
     }
 
-    template<>
-    FrameGraphId<FrameGraphRenderTarget> create(const char* name,
-            typename FrameGraphRenderTarget::Descriptor const& desc) noexcept {
-        fg::RenderTargetResourceEntry* pBase = mArena.make<fg::RenderTargetResourceEntry>(name, desc, mId++, 1);
-        FrameGraphId<FrameGraphRenderTarget> r(create(pBase));
-        return r;
-    }
+//    template<>
+//    FrameGraphId<FrameGraphRenderTarget> create(const char* name,
+//            typename FrameGraphRenderTarget::Descriptor const& desc) noexcept {
+//        fg::RenderTargetResourceEntry* pBase = mArena.make<fg::RenderTargetResourceEntry>(name, desc, mId++, 1);
+//        FrameGraphId<FrameGraphRenderTarget> r(create(pBase));
+//        return r;
+//    }
 
     fg::ResourceNode& getResourceNode(FrameGraphHandle r);
     fg::ResourceNode& getResourceNodeUnchecked(FrameGraphHandle r);
@@ -327,6 +325,31 @@ private:
     Vector<UniquePtr<fg::ResourceEntryBase>> mResourceEntries;
     uint16_t mId = 0;
 };
+
+    template<>
+    FrameGraphId<FrameGraphRenderTarget> FrameGraph::Builder::create<FrameGraphRenderTarget>(const char* name, FrameGraphRenderTarget::Descriptor const& desc) noexcept {
+        return createRenderTargetImpl(name, desc);
+    }
+    template<>
+    FrameGraphId<FrameGraphRenderTarget> FrameGraph::import(const char* name,
+            typename FrameGraphRenderTarget::Descriptor const& desc,
+            const FrameGraphRenderTarget& resource) noexcept {
+        fg::ResourceEntryBase* pBase = mArena.make<fg::RenderTargetResourceEntry>(
+                name, desc, resource, mId++, 1);
+        return FrameGraphId<FrameGraphRenderTarget>(create(pBase));
+    }
+    template<>
+    FrameGraphId<FrameGraphRenderTarget> FrameGraph::create(const char* name,
+                                                typename FrameGraphRenderTarget::Descriptor const& desc) noexcept {
+        fg::RenderTargetResourceEntry* pBase = mArena.make<fg::RenderTargetResourceEntry>(name, desc, mId++, 1);
+        FrameGraphId<FrameGraphRenderTarget> r(create(pBase));
+        return r;
+    }
+
+    FrameGraphId<FrameGraphRenderTarget> FrameGraph::Builder::createRenderTarget(const char* name,
+                                                            FrameGraphRenderTarget::Descriptor const& desc) noexcept {
+        return create<FrameGraphRenderTarget>(name, desc);
+    }
 
 } // namespace filament
 
