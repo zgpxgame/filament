@@ -273,6 +273,7 @@ FrameGraph& FrameGraph::compile() noexcept {
      * compute passes and resource reference counts
      */
 
+    // 只读资源而不写入资源的passnode没有有意义的输出，认为是无效结点，可以剔除
     for (PassNode& pass : passNodes) {
         // compute passes reference counts (i.e. resources we're writing to)
         pass.refCount = (uint32_t)pass.writes.size() + (uint32_t)pass.hasSideEffect;

@@ -323,7 +323,7 @@ private:
     LinearAllocatorArena mArena;
     Vector<fg::PassNode> mPassNodes;                    // list of frame graph passes
     Vector<fg::ResourceNode *> mResourceNodes;          // list of resource nodes
-    Vector<UniquePtr<fg::ResourceNode>> mResourceNodeEntries;
+    Vector<UniquePtr<fg::ResourceNode>> mResourceNodeEntries; // 作用是，通过智能指针释放资源
     Vector<UniquePtr<fg::ResourceEntryBase>> mResourceEntries;
     uint16_t mId = 0;
 };
